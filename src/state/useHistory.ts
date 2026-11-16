@@ -1,7 +1,7 @@
 import { useCallback, useReducer } from 'react'
 import type { Project } from '../types'
 
-interface HistoryState {
+export interface HistoryState {
   past: Project[]
   present: Project
   future: Project[]
@@ -20,7 +20,7 @@ type HistoryAction =
 
 const LIMIT = 100
 
-function reducer(state: HistoryState, action: HistoryAction): HistoryState {
+export function historyReducer(state: HistoryState, action: HistoryAction): HistoryState {
   switch (action.type) {
     case 'commit':
       if (action.project === state.present) return state
@@ -50,7 +50,7 @@ function reducer(state: HistoryState, action: HistoryAction): HistoryState {
 }
 
 export function useHistory(initial: () => Project) {
-  const [state, dispatch] = useReducer(reducer, undefined, () => ({
+  const [state, dispatch] = useReducer(historyReducer, undefined, () => ({
     past: [],
     present: initial(),
     future: [],

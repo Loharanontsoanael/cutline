@@ -1,6 +1,6 @@
-import type { Clip, Grade, Project, TitleAnimation, TitleClip, TitlePosition, TransitionKind, VideoClip } from '../types'
+import type { AudioClip, Clip, ClipPatch, Grade, Project, TitleAnimation, TitleClip, TitlePosition, TransitionKind, VideoClip } from '../types'
 import { GRADE_CONTROLS, GRADE_PRESETS, presetById } from '../lib/grades'
-import { previousAdjacent } from '../lib/project'
+import { DUCK_GAIN, isAudio, previousAdjacent } from '../lib/project'
 import { formatTime } from '../lib/time'
 import { PresetThumb } from './PresetThumb'
 
@@ -18,7 +18,7 @@ interface Props {
   clip: Clip | null
   time: number
   playing: boolean
-  onPatch: (id: string, patch: Partial<VideoClip> | Partial<TitleClip>) => void
+  onPatch: (id: string, patch: ClipPatch) => void
   onBeginGesture: () => void
   onEndGesture: () => void
   onApplyLookToAll: (grade: Grade, presetId: string | null) => void
@@ -30,12 +30,13 @@ export function Inspector(props: Props) {
     return (
       <aside className="inspector" aria-label="Inspector">
         <h2>Inspector</h2>
-        <p className="muted">Select a clip on the timeline to grade it, add a transition or edit a title.</p>
+        <p className="muted">Select a clip on the timeline to grade it, add a transition, edit a title or mix its sound.</p>
         <div className="hint-card">
           <strong>Quick tour</strong>
           <ul>
             <li>Drag clips to move them, drag their edges to trim.</li>
             <li>Pick a look in one click, then fine-tune if you want.</li>
+            <li>Add music from the Media panel, then set its volume and fades here.</li>
             <li>Coming from Premiere Pro or Final Cut Pro? Switch the keyboard layout at the top right.</li>
             <li>
               Press <kbd>?</kbd> to see every shortcut.
@@ -47,7 +48,9 @@ export function Inspector(props: Props) {
   }
   return (
     <aside className="inspector" aria-label="Inspector">
-      {clip.track === 'video' ? <VideoInspector {...props} clip={clip} /> : <TitleInspector {...props} clip={clip} />}
+      {clip.track === 'video' && <VideoInspector {...props} clip={clip} />}
+      {clip.track === 'title' && <TitleInspector {...props} clip={clip} />}
+      {isAudio(clip) && <AudioInspector {...props} clip={clip} />}
     </aside>
   )
 }
@@ -223,6 +226,54 @@ function TitleInspector({ clip, onPatch, onBeginGesture, onEndGesture }: Props &
             ))}
           </div>
         </div>
+      </section>
+    </>
+  )
+}
+
+function AudioInspector({ clip, onPatch, onBeginGesture, onEndGesture }: Props & { clip: AudioClip }) {
+  const maxFade = Math.max(0.1, Math.min(5, clip.duration / 2))
+  const sliders: { key: 'gain' | 'fadeIn' | 'fadeOut'; label: string; max: number; show: (v: number) => string }[] = [
+    { key: 'gain', label: 'Volume', max: 1.5, show: (v) => `${Math.round(v * 100)}%` },
+    { key: 'fadeIn', label: 'Fade in', max: maxFade, show: (v) => `${v.toFixed(2)}s` },
+    { key: 'fadeOut', label: 'Fade out', max: maxFade, show: (v) => `${v.toFixed(2)}s` },
+  ]
+  return (
+    <>
+      <h2>{clip.name}</h2>
+      <Timing clip={clip} />
+      <section className="panel">
+        <header className="panel-head">
+          <h3>Sound</h3>
+          <span className="muted">{clip.track === 'voice' ? 'Voice' : clip.source.kind === 'synth' ? 'Generated, loops' : clip.source.fileName}</span>
+        </header>
+        {sliders.map((s) => {
+          const value = Math.min(clip[s.key], s.max)
+          return (
+            <label key={s.key} className="slider">
+              <span>{s.label}</span>
+              <input
+                type="range"
+                min={0}
+                max={s.max}
+                step={0.01}
+                value={value}
+                onPointerDown={onBeginGesture}
+                onPointerUp={onEndGesture}
+                onChange={(e) => onPatch(clip.id, { [s.key]: Number(e.target.value) })}
+              />
+              <output>{s.show(value)}</output>
+            </label>
+          )
+        })}
+        <button className="link-btn" onClick={() => onPatch(clip.id, { gain: clip.gain === 0 ? 0.8 : 0 })}>
+          {clip.gain === 0 ? 'Unmute' : 'Mute this clip'}
+        </button>
+        <p className="muted small">
+          {clip.track === 'voice'
+            ? `Music drops to ${Math.round(DUCK_GAIN * 100)}% while this clip plays, and comes back after it.`
+            : 'The waveform on the timeline shows the volume, the fades and the ducking under voice clips.'}
+        </p>
       </section>
     </>
   )

@@ -1,16 +1,20 @@
 import { useMemo, useRef, useState } from 'react'
-import type { Clip, Project, TrackId, VideoClip } from '../types'
+import type { Clip, ClipPatch, Project, TrackId } from '../types'
 import { presetById } from '../lib/grades'
-import { clipEnd, MIN_CLIP, neighbourBounds, previousAdjacent, projectDuration, round, sourceLength, updateClip } from '../lib/project'
+import { clipEnd, hasFiniteSource, isAudio, MIN_CLIP, neighbourBounds, previousAdjacent, projectDuration, round, sourceLength, updateClip } from '../lib/project'
 import { SCENES } from '../lib/scenes'
 import { formatTime } from '../lib/time'
+import { Meter } from './Meter'
+import { Waveform } from './Waveform'
 
 const LABEL_W = 72
 const RULER_H = 28
-const TRACK_H: Record<TrackId, number> = { video: 72, title: 44 }
+const TRACK_H: Record<TrackId, number> = { video: 72, title: 44, voice: 48, audio: 56 }
 const TRACKS: { id: TrackId; label: string }[] = [
   { id: 'title', label: 'T1' },
   { id: 'video', label: 'V1' },
+  { id: 'voice', label: 'VO' },
+  { id: 'audio', label: 'A1' },
 ]
 
 interface Props {
@@ -19,6 +23,7 @@ interface Props {
   pxPerSec: number
   selectedId: string | null
   snapping: boolean
+  playing: boolean
   onSeek: (t: number) => void
   onSelect: (id: string | null) => void
   onBeginGesture: () => void
@@ -47,6 +52,8 @@ function tickStep(px: number): number {
 
 function clipBackground(clip: Clip): string {
   if (clip.track === 'title') return 'linear-gradient(180deg,#7c5cff,#5a3fd6)'
+  if (clip.track === 'audio') return 'linear-gradient(180deg,#1f8a70,#14604e)'
+  if (clip.track === 'voice') return 'linear-gradient(180deg,#c2477f,#8a2c58)'
   if (clip.source.kind === 'scene') {
     const kind = clip.source.scene
     return SCENES.find((s) => s.kind === kind)?.swatch ?? '#333'
@@ -61,6 +68,10 @@ export function Timeline(props: Props) {
   const [guide, setGuide] = useState<number | null>(null)
 
   const duration = projectDuration(project)
+  const duckKey = project.clips
+    .filter((c) => c.track === 'voice')
+    .map((c) => `${c.start}:${c.duration}:${isAudio(c) && c.gain === 0}`)
+    .join('|')
   const width = LABEL_W + (Math.max(duration, 20) + 12) * pxPerSec
   const step = tickStep(pxPerSec)
 
@@ -134,7 +145,7 @@ export function Timeline(props: Props) {
     const c = d.clip
     const end = clipEnd(c)
     let hit: number | null = null
-    let patch: Partial<Clip>
+    let patch: ClipPatch
 
     if (d.mode === 'move') {
       let start = c.start + dt
@@ -150,19 +161,19 @@ export function Timeline(props: Props) {
       start = Math.min(Math.max(start, d.bounds.min), d.bounds.max - c.duration)
       patch = { start: round(start) }
     } else if (d.mode === 'trim-left') {
-      const minOffset = c.track === 'video' && c.source.kind === 'video' ? 0 : -Infinity
-      const offset = c.track === 'video' ? c.offset : 0
+      const minOffset = hasFiniteSource(c) ? 0 : -Infinity
+      const offset = c.track === 'title' ? 0 : c.offset
       const s = snap(c.start + dt, d.snapPoints)
       hit = s.hit
       let start = Math.max(s.value, d.bounds.min, c.start - (offset - minOffset))
       start = Math.min(start, end - MIN_CLIP)
       const delta = start - c.start
       patch = { start: round(start), duration: round(end - start) }
-      if (c.track === 'video') (patch as Partial<VideoClip>).offset = round(c.offset + delta)
+      if (c.track !== 'title') patch = { ...patch, offset: round(c.offset + delta) }
     } else {
       const s = snap(end + dt, d.snapPoints)
       hit = s.hit
-      const offset = c.track === 'video' ? c.offset : 0
+      const offset = c.track === 'title' ? 0 : c.offset
       let newEnd = Math.min(s.value, d.bounds.max, c.start + sourceLength(c) - offset)
       newEnd = Math.max(newEnd, c.start + MIN_CLIP)
       patch = { duration: round(newEnd - c.start) }
@@ -195,6 +206,7 @@ export function Timeline(props: Props) {
           {formatTime(time)} <span className="muted">/ {formatTime(duration)}</span>
         </span>
         <div className="timeline-tools">
+          <Meter active={props.playing} />
           <button className={`chip ${snapping ? 'on' : ''}`} onClick={props.onToggleSnap} aria-pressed={snapping} title="Snap clips to edit points and the playhead">
             🧲 Snapping {snapping ? 'on' : 'off'}
           </button>
@@ -250,9 +262,9 @@ export function Timeline(props: Props) {
                         key={clip.id}
                         role="button"
                         tabIndex={0}
-                        aria-label={clip.track === 'video' ? `Clip ${clip.name}` : `Title ${clip.text}`}
+                        aria-label={clip.track === 'title' ? `Title ${clip.text}` : `${isAudio(clip) ? 'Audio' : 'Clip'} ${clip.name}`}
                         aria-pressed={selected}
-                        className={`clip clip-${clip.track} ${selected ? 'selected' : ''}`}
+                        className={`clip clip-${clip.track} ${isAudio(clip) ? 'clip-sound' : ''} ${selected ? 'selected' : ''}`}
                         style={{ left, width: w, background: clipBackground(clip) }}
                         onPointerDown={(e) => onClipPointerDown(e, clip, 'move')}
                         onKeyDown={(e) => {
@@ -260,8 +272,9 @@ export function Timeline(props: Props) {
                         }}
                       >
                         <div className="handle left" onPointerDown={(e) => onClipPointerDown(e, clip, 'trim-left')} />
+                        {isAudio(clip) && <Waveform project={project} clip={clip} duckKey={duckKey} pxPerSec={pxPerSec} height={TRACK_H[clip.track] - 12} />}
                         <div className="clip-body">
-                          <span className="clip-name">{clip.track === 'video' ? clip.name : clip.text}</span>
+                          <span className="clip-name">{clip.track === 'title' ? clip.text : clip.name}</span>
                           {clip.track === 'video' && (
                             <span className="clip-meta">
                               {preset && preset.id !== 'original' ? preset.name : clip.presetId === null ? 'Custom look' : ''}

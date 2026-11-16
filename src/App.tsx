@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { Clip, Grade, Project, SceneKind, TitleClip, VideoClip } from './types'
+import type { Clip, ClipPatch, Grade, Project, SceneKind, SynthKind } from './types'
 import { Inspector } from './components/Inspector'
 import { MediaBin } from './components/MediaBin'
 import { Preview } from './components/Preview'
 import { ShortcutSheet } from './components/ShortcutSheet'
 import { Timeline } from './components/Timeline'
+import { loadAudioFile } from './lib/audio'
+import { downloadBlob, exportMime, exportProject } from './lib/exporter'
 import { ACTIONS, comboFromEvent, displayCombo, findAction, KEYMAPS, type ActionId, type Bindings } from './lib/keymaps'
 import {
   addClip,
@@ -13,19 +15,23 @@ import {
   editPoints,
   FPS,
   freeSlot,
+  isAudio,
+  makeAudioClip,
   makeMediaClip,
   makeSceneClip,
   makeTitle,
-  projectDuration,
   removeClip,
   snapToFrame,
   splitClip,
+  synthName,
   updateClip,
 } from './lib/project'
-import { loadMedia, renderFrame } from './lib/renderer'
+import { loadMedia } from './lib/renderer'
+import { startRecording, synthesize, type Recording } from './lib/voice'
 import { useHistory } from './state/useHistory'
+import { usePlayback } from './state/usePlayback'
 
-const STORAGE_KEY = 'cutline.v1'
+const STORAGE_KEY = 'cutline.v2'
 
 interface Saved {
   project: Project
@@ -44,7 +50,7 @@ function readSaved(): Partial<Saved> {
 
 /** Imported files live in object URLs that die on reload, so only generated clips are saved. */
 function persistable(p: Project): Project {
-  return { clips: p.clips.filter((c) => c.track === 'title' || c.source.kind === 'scene') }
+  return { clips: p.clips.filter((c) => c.track === 'title' || c.source.kind === 'scene' || c.source.kind === 'synth') }
 }
 
 export default function App() {
@@ -52,8 +58,6 @@ export default function App() {
   const history = useHistory(() => (saved.project?.clips?.length ? saved.project : demoProject()))
   const { project } = history
 
-  const [time, setTime] = useState(0)
-  const [rate, setRate] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [pxPerSec, setPxPerSec] = useState(60)
   const [snapping, setSnapping] = useState(true)
@@ -62,21 +66,20 @@ export default function App() {
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [exportProgress, setExportProgress] = useState<number | null>(null)
+  const { time, timeRef, rate, setRate, seek, duration } = usePlayback(project, exportProgress !== null)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const timeRef = useRef(0)
   const gestureRef = useRef(false)
+  const projectRef = useRef(project)
+  useLayoutEffect(() => {
+    projectRef.current = project
+  })
+  const recordingRef = useRef<Recording | null>(null)
+  const [recording, setRecording] = useState(false)
 
-  const duration = projectDuration(project)
   const keymap = KEYMAPS.find((k) => k.id === keymapId) ?? KEYMAPS[0]
   const bindings = custom ?? keymap.bindings
   const selected = project.clips.find((c) => c.id === selectedId) ?? null
-
-  const seek = useCallback((t: number) => {
-    const clamped = Math.max(0, t)
-    timeRef.current = clamped
-    setTime(clamped)
-  }, [])
 
   const toastTimer = useRef<number | undefined>(undefined)
   const notify = useCallback((message: string) => {
@@ -97,30 +100,6 @@ export default function App() {
     return () => window.clearTimeout(handle)
   }, [project, keymapId, custom])
 
-  // Playback loop
-  useEffect(() => {
-    if (rate === 0 || exportProgress !== null) return
-    let frame = 0
-    let last = performance.now()
-    const tick = (now: number) => {
-      // rAF timestamps can be slightly older than performance.now(), so never step backwards by accident.
-      const dt = Math.max(0, (now - last) / 1000)
-      last = Math.max(last, now)
-      let next = timeRef.current + dt * rate
-      if (rate > 0 && next >= duration) {
-        next = duration
-        setRate(0)
-      } else if (rate < 0 && next <= 0) {
-        next = 0
-        setRate(0)
-      }
-      seek(next)
-      frame = requestAnimationFrame(tick)
-    }
-    frame = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(frame)
-  }, [rate, duration, seek, exportProgress])
-
   // ---------- editing helpers ----------
 
   const beginGesture = useCallback(() => {
@@ -134,7 +113,7 @@ export default function App() {
   }, [history])
 
   const patchClip = useCallback(
-    (id: string, patch: Partial<VideoClip> | Partial<TitleClip>) => {
+    (id: string, patch: ClipPatch) => {
       const next = updateClip(project, id, patch)
       if (gestureRef.current) history.preview(next)
       else history.commit(next)
@@ -156,11 +135,73 @@ export default function App() {
     setSelectedId(clip.id)
   }
 
+  function addSynth(kind: SynthKind) {
+    const start = freeSlot(project, 'audio', snapToFrame(time), 8)
+    const clip = makeAudioClip({ kind: 'synth', synth: kind }, synthName(kind), start, 8)
+    history.commit(addClip(project, clip))
+    setSelectedId(clip.id)
+  }
+
+  /** Puts a voice take on the VO track at the playhead, with its text as a caption when there is one. */
+  async function addVoice(blob: Blob, name: string, caption?: string) {
+    const sound = await loadAudioFile(blob)
+    const base = projectRef.current
+    const start = freeSlot(base, 'voice', snapToFrame(timeRef.current), sound.length)
+    const clip = makeAudioClip({ kind: 'file', url: sound.url, fileName: name, length: sound.length }, name, start, sound.length, 'voice')
+    let next = addClip(base, clip)
+    if (caption) {
+      const title = makeTitle(freeSlot(next, 'title', start, sound.length), caption, sound.length)
+      title.size = 40
+      title.position = 'bottom'
+      title.animation = 'fade'
+      next = addClip(next, title)
+    }
+    history.commit(next)
+    setSelectedId(clip.id)
+  }
+
+  async function generateVoice(text: string, apiKey: string, voiceId: string) {
+    try {
+      await addVoice(await synthesize(text, apiKey, voiceId), text.slice(0, 24), text)
+      notify('Voice and caption added at the playhead')
+    } catch (error) {
+      notify(`ElevenLabs: ${error instanceof Error ? error.message : 'request failed'}`)
+      throw error
+    }
+  }
+
+  async function toggleRecord() {
+    try {
+      if (recordingRef.current) {
+        const take = recordingRef.current
+        recordingRef.current = null
+        setRecording(false)
+        await addVoice(await take.stop(), 'Recording')
+        return
+      }
+      setRate(0)
+      recordingRef.current = await startRecording()
+      setRecording(true)
+    } catch {
+      setRecording(false)
+      notify('Could not use the microphone')
+    }
+  }
+
   async function importFiles(files: FileList) {
     let next = project
     let lastId: string | null = null
     for (const file of Array.from(files)) {
       try {
+        if (file.type.startsWith('audio/')) {
+          const sound = await loadAudioFile(file)
+          const start = freeSlot(next, 'audio', snapToFrame(timeRef.current), sound.length)
+          const source = { kind: 'file', url: sound.url, fileName: file.name, length: sound.length } as const
+          const clip = makeAudioClip(source, file.name.replace(/\.[^.]+$/, ''), start, sound.length)
+          next = addClip(next, clip)
+          lastId = clip.id
+          continue
+        }
         const media = await loadMedia(file)
         const length = media.kind === 'video' ? media.length : 4
         const start = freeSlot(next, 'video', snapToFrame(timeRef.current), length)
@@ -191,7 +232,7 @@ export default function App() {
   function splitAtPlayhead() {
     const t = timeRef.current
     const under = clipsAt(project, t)
-    const target: Clip | undefined = under.find((c) => c.id === selectedId) ?? under.find((c) => c.track === 'video') ?? under[0]
+    const target: Clip | undefined = under.find((c) => c.id === selectedId) ?? under.find((c) => c.track === 'video') ?? under.find((c) => !isAudio(c)) ?? under[0]
     if (!target) {
       notify('Move the playhead over a clip to cut it')
       return
@@ -328,44 +369,22 @@ export default function App() {
   async function exportVideo() {
     const canvas = canvasRef.current
     if (!canvas || duration <= 0) return
-    const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find((m) => MediaRecorder.isTypeSupported(m))
-    if (!mime) {
+    if (!exportMime(project)) {
       notify('This browser cannot record video. Try Chrome or Firefox.')
       return
     }
     setRate(0)
     setSelectedId(null)
-    const ctx = canvas.getContext('2d')!
-    const stream = canvas.captureStream(FPS)
-    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 })
-    const chunks: Blob[] = []
-    recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data)
-    const done = new Promise<void>((resolve) => (recorder.onstop = () => resolve()))
     setExportProgress(0)
-    recorder.start(250)
-    const t0 = performance.now()
-    await new Promise<void>((resolve) => {
-      const step = (now: number) => {
-        const t = (now - t0) / 1000
-        renderFrame(ctx, project, Math.min(t, duration), { playing: true })
-        setExportProgress(Math.min(1, t / duration))
-        if (t >= duration) resolve()
-        else requestAnimationFrame(step)
-      }
-      requestAnimationFrame(step)
-    })
-    recorder.stop()
-    await done
-    const blob = new Blob(chunks, { type: 'video/webm' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'cutline-export.webm'
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 10_000)
-    setExportProgress(null)
-    seek(0)
-    notify('Export ready: cutline-export.webm')
+    try {
+      downloadBlob(await exportProject(canvas, project, setExportProgress), 'cutline-export.webm')
+      notify('Export ready: cutline-export.webm')
+    } catch {
+      notify('Export failed. Keep this tab in front and try again.')
+    } finally {
+      setExportProgress(null)
+      seek(0)
+    }
   }
 
   function resetDemo() {
@@ -426,7 +445,12 @@ export default function App() {
       </header>
 
       <main className="workspace">
-        <MediaBin onAddScene={addScene} onAddTitle={addTitle} onImport={importFiles} />
+        <MediaBin onAddScene={addScene} onAddTitle={addTitle} onAddSynth={addSynth}
+          onImport={importFiles}
+          recording={recording}
+          onGenerateVoice={generateVoice}
+          onToggleRecord={toggleRecord}
+        />
         <Preview
           project={project}
           time={time}
@@ -461,6 +485,7 @@ export default function App() {
         pxPerSec={pxPerSec}
         selectedId={selectedId}
         snapping={snapping}
+        playing={rate !== 0 || exportProgress !== null}
         onSeek={(t) => {
           setRate(0)
           seek(snapToFrame(t))
@@ -491,7 +516,7 @@ export default function App() {
           <div className="modal export" role="dialog" aria-modal="true" aria-label="Exporting">
             <h2>Exporting…</h2>
             <progress value={exportProgress} max={1} />
-            <p className="muted small">Rendering in real time to WebM. Keep this tab in front.</p>
+            <p className="muted small">Rendering picture and sound in real time to WebM. Keep this tab in front.</p>
           </div>
         </div>
       )}

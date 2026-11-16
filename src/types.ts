@@ -52,7 +52,27 @@ export interface TitleClip extends ClipBase {
   animation: TitleAnimation
 }
 
-export type Clip = VideoClip | TitleClip
+export type SynthKind = 'pulse' | 'ambient' | 'keys'
+
+export type AudioSource =
+  | { kind: 'synth'; synth: SynthKind }
+  | { kind: 'file'; url: string; fileName: string; length: number }
+
+export interface AudioClip extends ClipBase {
+  /** `audio` is the music track, `voice` the narration track. Music ducks under voice. */
+  track: 'audio' | 'voice'
+  name: string
+  source: AudioSource
+  /** Where the clip starts inside its source, in seconds. Generated beds loop, so any value is valid. */
+  offset: number
+  /** Linear gain, 0..1.5. */
+  gain: number
+  fadeIn: number
+  fadeOut: number
+}
+
+export type Clip = VideoClip | TitleClip | AudioClip
+export type ClipPatch = Partial<VideoClip> | Partial<TitleClip> | Partial<AudioClip>
 export type TrackId = Clip['track']
 
 export interface Project {
