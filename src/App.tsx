@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Clip, ClipPatch, Grade, Project, SceneKind, SynthKind } from './types'
+import { Icon } from './components/Icon'
 import { Inspector } from './components/Inspector'
 import { MediaBin } from './components/MediaBin'
 import { Preview } from './components/Preview'
@@ -400,29 +401,31 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="logo" aria-hidden>
-            ◐
-          </span>
+          <svg className="logo" width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+            <rect x="1" y="5" width="6.5" height="8" rx="1" fill="currentColor" />
+            <rect x="10.5" y="5" width="6.5" height="8" rx="1" fill="currentColor" opacity="0.45" />
+            <rect x="8.5" y="1" width="1" height="16" className="logo-cut" />
+          </svg>
           <span>Cutline</span>
         </div>
         <div className="toolbar" role="toolbar" aria-label="Editing">
           <button className="btn ghost" onClick={history.undo} disabled={!history.canUndo} title="Undo">
-            ↶ Undo
+            <Icon name="undo" /> Undo
           </button>
           <button className="btn ghost" onClick={history.redo} disabled={!history.canRedo} title="Redo">
-            ↷ Redo
+            <Icon name="redo" /> Redo
           </button>
           <span className="sep" />
           <button className="btn ghost" onClick={splitAtPlayhead} title={`Cut at playhead (${splitKey})`}>
-            ✂ Cut <kbd>{splitKey}</kbd>
+            <Icon name="cut" /> Cut <kbd>{splitKey}</kbd>
           </button>
           <button className="btn ghost" onClick={() => deleteSelected(true)} disabled={!selectedId} title="Ripple delete">
-            🗑 Delete
+            <Icon name="trash" /> Delete
           </button>
         </div>
         <div className="topbar-right">
           <label className="keymap-select">
-            <span className="muted small">Shortcuts</span>
+            <span className="muted small">Layout</span>
             <select value={custom ? 'custom' : keymapId} onChange={(e) => selectKeymap(e.target.value)} aria-label="Keyboard layout">
               {custom && <option value="custom">Custom</option>}
               {KEYMAPS.map((k) => (
@@ -433,10 +436,10 @@ export default function App() {
             </select>
           </label>
           <button className="btn ghost" onClick={() => setShowShortcuts(true)} title="All shortcuts (?)">
-            ⌨ ?
+            <Icon name="keyboard" /> Shortcuts
           </button>
           <button className="btn ghost" onClick={resetDemo} title="Reload the demo project">
-            Demo
+            Reset demo
           </button>
           <button className="btn primary" onClick={exportVideo} disabled={exportProgress !== null}>
             Export

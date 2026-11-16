@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import type { SceneKind, SynthKind } from '../types'
 import { SYNTHS } from '../lib/audio'
 import { SCENES } from '../lib/scenes'
+import { Icon } from './Icon'
 import { VoicePanel } from './VoicePanel'
 
 interface Props {
@@ -36,12 +37,12 @@ export function MediaBin({ onAddScene, onAddTitle, onAddSynth, onImport, recordi
       <div className="bin-list">
         {SYNTHS.map((s) => (
           <button key={s.kind} className="bin-row" onClick={() => onAddSynth(s.kind)} title={`Add ${s.name} to the audio track`}>
-            <span className="bin-row-icon" aria-hidden>
-              ♪
+            <span className="bin-row-icon">
+              <Icon name="note" size={14} />
             </span>
-            <span>
+            <span className="bin-row-text">
               {s.name}
-              <span className="muted small"> · {s.hint}</span>
+              <span className="muted small">{s.hint}</span>
             </span>
           </button>
         ))}

@@ -4,6 +4,7 @@ import { presetById } from '../lib/grades'
 import { clipEnd, hasFiniteSource, isAudio, MIN_CLIP, neighbourBounds, previousAdjacent, projectDuration, round, sourceLength, updateClip } from '../lib/project'
 import { SCENES } from '../lib/scenes'
 import { formatTime } from '../lib/time'
+import { Icon } from './Icon'
 import { Meter } from './Meter'
 import { Waveform } from './Waveform'
 
@@ -208,7 +209,7 @@ export function Timeline(props: Props) {
         <div className="timeline-tools">
           <Meter active={props.playing} />
           <button className={`chip ${snapping ? 'on' : ''}`} onClick={props.onToggleSnap} aria-pressed={snapping} title="Snap clips to edit points and the playhead">
-            🧲 Snapping {snapping ? 'on' : 'off'}
+            <Icon name="magnet" size={14} /> Snapping {snapping ? 'on' : 'off'}
           </button>
           <label className="zoom">
             <span>Zoom</span>

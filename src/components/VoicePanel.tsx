@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Icon } from './Icon'
 import { DEFAULT_VOICE_ID, saveApiKey, savedApiKey } from '../lib/voice'
 
 interface Props {
@@ -52,7 +53,7 @@ export function VoicePanel({ recording, onGenerate, onToggleRecord }: Props) {
         {busy ? 'Generating…' : 'Generate voice + caption'}
       </button>
       <button className={`btn wide ${recording ? 'recording' : ''}`} onClick={onToggleRecord}>
-        {recording ? '■ Stop recording' : '● Record with microphone'}
+        <Icon name={recording ? 'stop' : 'mic'} size={14} /> {recording ? 'Stop recording' : 'Record with microphone'}
       </button>
       <p className="muted small">Music lowers itself while a voice clip plays.</p>
     </div>

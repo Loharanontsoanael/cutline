@@ -2,6 +2,7 @@ import { useEffect, type RefObject } from 'react'
 import type { Project } from '../types'
 import { OUTPUT_HEIGHT, OUTPUT_WIDTH, renderFrame } from '../lib/renderer'
 import { formatTime } from '../lib/time'
+import { Icon } from './Icon'
 
 interface Props {
   project: Project
@@ -36,19 +37,19 @@ export function Preview({ project, time, rate, duration, canvasRef, onTogglePlay
       </div>
       <div className="transport">
         <button className="icon-btn" onClick={() => onSeek(0)} aria-label="Go to start" title="Go to start">
-          ⏮
+          <Icon name="start" />
         </button>
         <button className="icon-btn" onClick={() => onStep(-1)} aria-label="Previous frame" title="Previous frame">
-          ◀︎
+          <Icon name="back" />
         </button>
         <button className="icon-btn play" onClick={onTogglePlay} aria-label={playing ? 'Pause' : 'Play'} title="Play / pause">
-          {playing ? '❚❚' : '▶'}
+          <Icon name={playing ? 'pause' : 'play'} />
         </button>
         <button className="icon-btn" onClick={() => onStep(1)} aria-label="Next frame" title="Next frame">
-          ▶︎
+          <Icon name="forward" />
         </button>
         <button className="icon-btn" onClick={() => onSeek(duration)} aria-label="Go to end" title="Go to end">
-          ⏭
+          <Icon name="end" />
         </button>
         <span className="timecode big">{formatTime(time)}</span>
         {Math.abs(rate) > 1 || rate < 0 ? <span className="rate">{rate > 0 ? `${rate}×` : `◀ ${Math.abs(rate)}×`}</span> : null}

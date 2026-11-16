@@ -67,6 +67,8 @@ Import the repository in Vercel. It detects Vite automatically: build command `n
 
 React 19, TypeScript, Vite. No UI, video or audio library.
 
+The interface is neutral grey with no hue, like a grading suite, so the only colour on screen is the footage and the clips. Type is IBM Plex Sans, with IBM Plex Mono for timecode. Fonts are bundled, nothing loads from a third party.
+
 The project is plain data, every edit is a pure function on it, and picture and sound are both computed from that data and a time. That one rule is what makes undo, scrubbing, thumbnails, waveforms and export agree with each other.
 
 ```
