@@ -1,5 +1,7 @@
 # Cutline
 
+**Live demo:** https://cutline-lilac-seven.vercel.app
+
 A small video editor that runs entirely in the browser. It focuses on what editors care about every day: getting a good look fast, cutting precisely on a timeline, mixing voice and music without thinking about it, and keeping the keyboard shortcuts their hands already know.
 
 ![Cutline screenshot](docs/screenshot.jpg)
